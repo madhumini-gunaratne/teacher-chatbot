@@ -1,0 +1,35 @@
+{
+  "model": "text-embedding-3-small",
+  "chunks": [
+    {
+      "id": "lec1_chunk1",
+      "source": "EE418_Lecture1.pdf",
+      "text": "Information security is the practice of protecting information and communication systems from unauthorized access, modification, disclosure, or destruction. It focuses on reducing risk rather than achieving perfection. Security is strategic, contextual, and adversarial by nature.",
+      "embedding": [0.0, 0.1, 0.2]
+    },
+    {
+      "id": "lec1_chunk2",
+      "source": "EE418_Lecture1.pdf",
+      "text": "The objectives of information security include confidentiality, authentication, integrity, authorization, non-repudiation, and certification. Each ensures that data is accessible only to authorized parties and can be trusted during transmission and storage.",
+      "embedding": [0.3, 0.4, 0.5]
+    },
+    {
+      "id": "lec1_chunk3",
+      "source": "EE418_Lecture1.pdf",
+      "text": "Modular arithmetic allows operations to wrap around a finite set of values. It is fundamental in cryptography because encryption and decryption must stay within fixed numeric ranges such as the alphabet 0–25 mapping.",
+      "embedding": [0.6, 0.7, 0.8]
+    },
+    {
+      "id": "lec1_chunk4",
+      "source": "EE418_Lecture1.pdf",
+      "text": "Monoalphabetic ciphers map each plaintext letter to one ciphertext letter using a fixed key, such as in substitution and shift (Caesar) ciphers. Polyalphabetic ciphers like Vigenère and Hill use multiple keys to obscure frequency patterns.",
+      "embedding": [0.9, 1.0, 1.1]
+    },
+    {
+      "id": "lec1_chunk5",
+      "source": "EE418_Lecture1.pdf",
+      "text": "Permutation or transposition ciphers keep the plaintext letters unchanged but reorder their positions. Stream ciphers encrypt data symbol-by-symbol using a pseudo-random keystream, enabling secure real-time communication.",
+      "embedding": [1.2, 1.3, 1.4]
+    }
+  ]
+}

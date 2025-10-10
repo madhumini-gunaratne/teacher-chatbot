@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>TeacherChat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- Load marked BEFORE we use it (safe if offline too) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  </head>
+  <body>
+    <div class="chat-container">
+      <h1>TeacherChat</h1>
+      <div id="chat-box"></div>
+
+      <form id="chat-form">
+        <input id="user-input" type="text" placeholder="Ask something..." autocomplete="off" required />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+
+    <script>
+      // Grab elements
+      const form = document.getElementById("chat-form");
+      const input = document.getElementById("user-input");
+      const chatBox = document.getElementById("chat-box");
+
+      function add(role, text, isHTML = false) {
+        const wrap = document.createElement('div');
+        wrap.className = role === 'user' ? 'user msg' : 'bot msg';
+        const label = role === 'user' ? 'You' : 'Teacher';
+
+        if (isHTML) {
+          wrap.innerHTML = `<b>${label}:</b><br>${text}`;
+        } else {
+          wrap.innerText = `${label}: ${text}`;
+        }
+        chatBox.appendChild(wrap);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault(); // stop page reload
+        const text = input.value.trim();
+        if (!text) return;
+
+        add('user', text);
+        input.value = "";
+
+        try {
+          const res = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text })
+          });
+
+          // log status to help debugging
+          console.log("POST /chat →", res.status);
+
+          const data = await res.json().catch(() => ({}));
+
+          if (data.reply) {
+            // Render markdown if library is available
+            const html = (window.marked && marked.parse)
+              ? marked.parse(data.reply)
+              : data.reply.replace(/\n/g, "<br>");
+            add('bot', html, true);
+          } else {
+            add('bot', "Error: " + (data.error || `HTTP ${res.status}`));
+          }
+        } catch (err) {
+          console.error(err);
+          add('bot', "Network error: " + err.message);
+        }
+      });
+    </script>
+  </body>
+</html>
