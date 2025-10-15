@@ -48,4 +48,5 @@ Thumbs.db
 temp_voice_analysis.wav
 *.wav
 *.mp3
+*.mp4
 data/media/
