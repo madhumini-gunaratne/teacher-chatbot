@@ -39,15 +39,22 @@ A voice-enabled AI teacher chatbot that makes learning engaging and interactive 
    ```
 
 4. **Set up environment variables**
+   Create a `.env` file in the root directory:
    ```bash
-   cp .env.example .env
+   touch .env
    ```
-   Edit `.env` and add your OpenAI API key:
+   
+   Add the following variables:
    ```
-   OPENAI_API_KEY=your_api_key_here
-   FLASK_SECRET_KEY=your_secret_key_here
-   OPENAI_MODEL=gpt-3.5-turbo
+   OPENAI_API_KEY=your_actual_openai_api_key_here
    ```
+   
+   **How to get your OpenAI API key:**
+   1. Visit https://platform.openai.com/api-keys
+   2. Create a new API key
+   3. Copy and paste it into `.env`
+   
+   ⚠️ **Important:** Never commit `.env` to git! It's already in `.gitignore`
 
 5. **Run the application**
    ```bash
@@ -196,29 +203,6 @@ The chatbot automatically:
 - Verify OpenAI API status
 - API might be rate limiting
 
-## 🚀 Deployment
-
-### Local Development
-```bash
-python3 app.py
-```
-
-### Production (Gunicorn)
-```bash
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:8000 app:app
-```
-
-### Docker (Optional)
-```bash
-docker build -t lowkey-genius .
-docker run -p 8000:8000 --env-file .env lowkey-genius
-```
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
 ## 👨‍💼 Author
 
 Created by Madhumini Gunaratne
@@ -231,24 +215,5 @@ Contributions are welcome! Please:
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-## 📞 Support
-
-For issues or questions:
-- Check existing GitHub issues
-- Create a new issue with detailed description
-- Include error messages and steps to reproduce
-
-## 🎯 Future Enhancements
-
-- [ ] Support for additional languages
-- [ ] Custom voice options
-- [ ] Conversation export as PDF
-- [ ] Integration with LMS platforms
-- [ ] Multi-user sessions
-- [ ] Analytics dashboard
-- [ ] Custom course material upload UI
-
----
 
 **Happy learning with Lowkey Genius!** 🚀✨
