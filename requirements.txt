@@ -3,5 +3,9 @@ gunicorn
 python-dotenv
 openai>=1.30.0
 numpy
+scipy
 pypdf
 tqdm
+moviepy
+whisper
+pydub

@@ -1,19 +1,23 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 from openai import OpenAI
+from pathlib import Path
 import os, json
 import numpy as np
+from datetime import timedelta
 
-# --- env + client ---
+# load env + client
 load_dotenv()
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
+app.permanent_session_lifetime = timedelta(minutes=30)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# --- models ---
-CHAT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# AI models 
+CHAT_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")  # using a valid model name
 EMBED_MODEL = "text-embedding-3-small"  # unused while in dummy mode
 
-# ---- Persona (system prompt) ----
+# system prompt and teaching style
 def read_text(path, default=""):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -21,23 +25,62 @@ def read_text(path, default=""):
     except FileNotFoundError:
         return default
 
+def get_teaching_style():
+    """Get aggregated teaching style from transcripts"""
+    transcripts_dir = Path("data/media/transcripts")
+    if not transcripts_dir.exists():
+        return {}
+    
+    # Aggregate style scores from all transcripts
+    style_scores = {}
+    transcript_count = 0
+    
+    for transcript_file in transcripts_dir.glob("*.json"):
+        try:
+            with open(transcript_file, 'r', encoding='utf-8') as f:
+                transcript = json.load(f)
+                if 'teaching_style' in transcript:
+                    for style, score in transcript['teaching_style'].items():
+                        style_scores[style] = style_scores.get(style, 0) + score
+                    transcript_count += 1
+        except Exception as e:
+            print(f"Error reading transcript {transcript_file}: {e}")
+    
+    # Average the scores
+    if transcript_count > 0:
+        return {style: score/transcript_count for style, score in style_scores.items()}
+    return {}
+
 SYSTEM_PROMPT = read_text(
     "data/system_prompt.txt",
-    "You are a calm, patient teacher. Explain step-by-step with small examples and check understanding."
+    """You are an enthusiastic and engaging teacher who makes learning fun! 🌟 You explain complex topics with excitement, 
+using relatable examples, fun analogies, and occasional humor to keep students engaged.
+
+Your teaching style:
+1. Use emojis appropriately to add personality 🎯
+2. Create fun, memorable analogies from everyday life
+3. Tell mini-stories to explain concepts
+4. Use "Imagine if..." scenarios to make ideas relatable
+5. Add encouraging comments when students ask good questions
+6. Include occasional light-hearted jokes or puns related to the topic
+
+Remember to maintain the perfect balance between being fun and educational. Keep the energy high while ensuring 
+the content is accurate and helpful. When students ask questions, show genuine enthusiasm in your responses!"""
 )
 
-# ---- Simple style booster (keeps answers short & step-by-step) ----
+# style guide for fun and engaging explanations
 SIMPLE_STYLE = (
-    "Always answer in this exact format:\n"
-    "- One-sentence idea.\n"
-    "- Steps: 3–5 numbered lines, one short line each.\n"
-    "- Use tiny examples (numbers or A–Z) if helpful.\n"
-    "- Avoid jargon; define any new term in plain words.\n"
-    "- End with: 'TL;DR: ...' one line.\n"
-    "Hard limit: 120 words total."
+    "Make learning fun with this format! 🌟\n"
+    "1. Hook: Start with an intriguing question or fun fact 🤔\n"
+    "2. Adventure Time: Take students on a journey through the concept with 3-4 exciting stops 🚀\n"
+    "3. Real-Life Magic: Share a fun, relatable example or story 🎯\n"
+    "4. Mind-Blown Moment: Connect it to something surprising or interesting 💡\n"
+    "5. Challenge: End with a fun 'what if' question or mini-puzzle 🎮\n"
+    "6. Victory Lap: Sum it up with an encouraging TL;DR 🏆\n\n"
+    "Remember: Keep it fun but informative, use emojis wisely, and celebrate learning moments!"
 )
 
-# ---- Load vector index (dummy-friendly) ----
+# load vector index (dummy-friendly) 
 INDEX_PATH = "data/index.json"
 INDEX = {"model": EMBED_MODEL, "chunks": []}
 EMB = None  # would hold embeddings if using real retrieval
@@ -61,78 +104,176 @@ def load_index():
 
 load_index()
 
-# ---- Dummy retrieval (returns all chunks) ----
+# dummy retrieval (returns all chunks) 
 def embed_query(q: str):
-    # Skipped while in dummy mode
-    return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    """Get embeddings for the query using OpenAI's API"""
+    try:
+        resp = client.embeddings.create(model=EMBED_MODEL, input=q)
+        return np.array(resp.data[0].embedding, dtype=np.float32)
+    except Exception as e:
+        print(f"Error getting embeddings: {e}")
+        return np.array([0.0] * 1536, dtype=np.float32)  # Default embedding dimension
 
 def retrieve(query: str, k=4):
-    # In dummy mode, just return all chunks (or first k if you prefer)
-    return INDEX["chunks"][:max(1, k)] if INDEX["chunks"] else []
+    """Find the most relevant chunks using embeddings similarity"""
+    if not INDEX["chunks"] or EMB is None:
+        return INDEX["chunks"][:max(1, k)] if INDEX["chunks"] else []
+    
+    # Get query embedding and normalize it
+    q_emb = embed_query(query)
+    q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-10)
+    
+    # Calculate similarity scores
+    scores = EMB @ q_emb
+    
+    # Get top k chunks
+    top_k = np.argsort(scores)[-k:][::-1]
+    return [INDEX["chunks"][i] for i in top_k]
 
 def build_context(chunks):
     parts = []
     for c in chunks:
-        parts.append(f"[Source: {c.get('source','notes')}] {c.get('text','')}")
+        source = c.get('source', 'notes')
+        text = c.get('text', '')
+        timestamp = ''
+        
+        # If it's from a video transcript, include timestamp
+        if 'LECTURE:' in source and 'segments' in c:
+            for seg in c['segments']:
+                if seg['text'] in text:
+                    timestamp = f" [Time: {seg['start']}]"
+                    break
+        
+        parts.append(f"[Source: {source}{timestamp}] {text}")
     return "\n\n".join(parts)
 
-# ---- routes ----
+def adapt_response_to_style(teaching_style):
+    """Generate style instructions based on teacher's style"""
+    style_prompts = []
+    
+    if not teaching_style:
+        return ""
+    
+    # Add style-specific instructions
+    if teaching_style.get('interactive', 0) > 0.2:
+        style_prompts.append("Ask engaging questions throughout your explanation")
+    
+    if teaching_style.get('encouraging', 0) > 0.2:
+        style_prompts.append("Use encouraging phrases and positive reinforcement")
+    
+    if teaching_style.get('methodical', 0) > 0.2:
+        style_prompts.append("Break down concepts step by step")
+    
+    if teaching_style.get('analogies', 0) > 0.2:
+        style_prompts.append("Use relevant analogies and metaphors")
+    
+    if teaching_style.get('humor', 0) > 0.2:
+        style_prompts.append("Include appropriate light-hearted comments")
+    
+    if teaching_style.get('empathetic', 0) > 0.2:
+        style_prompts.append("Show understanding of potential confusion points")
+    
+    return "\n".join(style_prompts)
+
+# flask routes
 @app.route("/")
 def home():
     return render_template("index.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    payload = request.get_json(silent=True) or {}
-    user_message = (payload.get("message") or "").strip()
-    if not user_message:
-        return jsonify({"error": "No 'message' in JSON body."}), 400
-
-    # 1) retrieve notes (dummy or real)
-    top_chunks = retrieve(user_message, k=4)
-    context_block = build_context(top_chunks) if top_chunks else ""
-
-    # 2) construct messages
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": SIMPLE_STYLE},
-    ]
-    if context_block:
-        messages.append({
-            "role": "system",
-            "content": (
-                "Use the following course materials to answer. "
-                "Cite the source filename inline like [Source: name]. "
-                "If not covered, say you don't have that info.\n\n" + context_block
-            )
-        })
-    messages.append({"role": "user", "content": user_message})
-
-    # 3) call model (with short, deterministic settings)
+    if request.method != "POST":
+        return jsonify({"error": "Method not allowed"}), 405
+    
+    print("=== Chat Request ===")
+    print("Method:", request.method)
+    print("Headers:", dict(request.headers))
+    
     try:
-        completion = client.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=400,
-        )
-        reply = completion.choices[0].message.content
-        return jsonify({"reply": reply})
-    except Exception as e:
-        # Fallback: synthesize from context so UI always shows something useful
+        payload = request.get_json(silent=True)
+        print("Received payload:", payload)
+        
+        if not payload:
+            print("No payload received") # Debug log
+            return jsonify({"error": "No JSON payload received"}), 400
+            
+        user_message = payload.get("message", "").strip()
+        print("User message:", user_message) # Debug log
+        
+        if not user_message:
+            return jsonify({"error": "No 'message' in JSON body."}), 400
+            
+        # Initialize session if not exists
+        if 'messages' not in session:
+            session['messages'] = []
+
+        # 1) retrieve notes (dummy or real)
+        top_chunks = retrieve(user_message, k=4)
+        context_block = build_context(top_chunks) if top_chunks else ""
+
+        # 2) construct messages with teaching style
+        teaching_style = get_teaching_style()
+        style_instructions = adapt_response_to_style(teaching_style)
+    
+        # Base system messages
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SIMPLE_STYLE},
+        ]
+    
+        # Add conversation history (last 5 messages)
+        messages.extend(session['messages'][-5:])
+        
+        if style_instructions:
+            messages.append({
+                "role": "system",
+                "content": f"Match the teacher's style:\n{style_instructions}"
+            })
         if context_block:
-            fallback = (
-                "One-line idea: Answer based on the course notes below.\n"
-                "1) Read the key lines from notes.\n"
-                "2) State the concept in plain words.\n"
-                "3) Give a tiny example (A=0..Z=25 or small numbers).\n"
-                "4) End with a one-line TL;DR.\n\n"
-                f"{context_block}\n\n"
-                "TL;DR: Used the notes above to summarize."
+            messages.append({
+                "role": "system",
+                "content": (
+                    "Use the following course materials to answer. "
+                    "Cite the source filename inline like [Source: name]. "
+                    "If not covered, say you don't have that info.\n\n" + context_block
+                )
+            })
+        messages.append({"role": "user", "content": user_message})
+
+        # 3) call model (with short, deterministic settings)
+        try:
+            completion = client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=400,
             )
-        else:
-            fallback = "I couldn't reach the model and I have no notes loaded yet."
-        return jsonify({"reply": fallback, "error": f"{type(e).__name__}: {e}"}), 200
+            reply = completion.choices[0].message.content
+            
+            # Update conversation history
+            session['messages'].append({"role": "user", "content": user_message})
+            session['messages'].append({"role": "assistant", "content": reply})
+            session.modified = True
+            
+            return jsonify({"reply": reply})
+        except Exception as e:
+            # Fallback: synthesize from context so UI always shows something useful
+            if context_block:
+                fallback = (
+                    "One-line idea: Answer based on the course notes below.\n"
+                    "1) Read the key lines from notes.\n"
+                    "2) State the concept in plain words.\n"
+                    "3) Give a tiny example (A=0..Z=25 or small numbers).\n"
+                    "4) End with a one-line TL;DR.\n\n"
+                    f"{context_block}\n\n"
+                    "TL;DR: Used the notes above to summarize."
+                )
+            else:
+                fallback = "I couldn't reach the model and I have no notes loaded yet."
+            return jsonify({"reply": fallback, "error": f"{type(e).__name__}: {e}"}), 200
+            
+    except Exception as e:
+        return jsonify({"error": "Server error occurred", "details": str(e)}), 500
 
 if __name__ == "__main__":
     # Change the port/host as you like (e.g., host='0.0.0.0' to test on phone)

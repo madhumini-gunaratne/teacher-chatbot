@@ -2,75 +2,506 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>TeacherChat</title>
+    <title>418 Chatbot</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-
-    <!-- Load marked BEFORE we use it (safe if offline too) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Load marked for markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Load highlight.js for code highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/highlight.min.js"></script>
   </head>
   <body>
     <div class="chat-container">
-      <h1>TeacherChat</h1>
+      <h1>🧠 418 Lowkey Genius </h1>
+      <div class="controls-container">
+        <div class="voice-controls">
+          <label class="switch">
+            <input type="checkbox" id="voice-output-toggle">
+            <span class="slider round"></span>
+          </label>
+          <span class="voice-label">Enable Voice Output</span>
+        </div>
+        <div class="voice-settings" id="voice-settings">
+          <select id="voice-select" class="voice-select">
+            <option value="">Loading voices...</option>
+          </select>
+          <div class="voice-controls-buttons">
+            <button type="button" id="pause-voice" class="control-btn pause-voice-btn">
+              <i class="fas fa-pause"></i> Pause
+            </button>
+            <button type="button" id="resume-voice" class="control-btn resume-voice-btn">
+              <i class="fas fa-play"></i> Resume
+            </button>
+            <!-- <button type="button" id="stop-voice" class="control-btn stop-voice-btn">
+              <i class="fas fa-stop"></i> Stop
+            </button> -->
+          </div>
+        </div>
+      </div>
+      <div class="chat-intro">
+        <p>👋 Hi there! I'm your friendly AI teacher. I love making learning fun and engaging!</p>
+        <p>💡 Ask me anything about the course materials - I'll explain with fun examples and stories.</p>
+      </div>
       <div id="chat-box"></div>
 
       <form id="chat-form">
-        <input id="user-input" type="text" placeholder="Ask something..." autocomplete="off" required />
-        <button type="submit">Send</button>
+        <input 
+          id="user-input" 
+          type="text" 
+          placeholder="Type or click microphone to speak..." 
+          autocomplete="off" 
+          required 
+        />
+        <button type="button" id="voice-input-btn" title="Click to speak">
+          <i class="fas fa-microphone"></i>
+        </button>
+        <button type="submit">
+          <i class="fas fa-paper-plane"></i> Send
+        </button>
       </form>
+      <div id="voice-status" class="voice-status"></div>
     </div>
 
     <script>
-      // Grab elements
-      const form = document.getElementById("chat-form");
-      const input = document.getElementById("user-input");
+      // Text-to-Speech Setup
+      const voiceOutputToggle = document.getElementById('voice-output-toggle');
+      const voiceSelect = document.getElementById('voice-select');
+      const voiceSettings = document.getElementById('voice-settings');
+      
+      let voices = [];
+      let currentUtterance = null;
+      let currentSpeechText = ''; // Track the text being spoken
+
+      function loadVoices() {
+        voices = speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          const englishVoices = voices.filter(voice => voice.lang.startsWith('en'));
+          
+          // Select only UK English voices
+          let selectedVoices = [];
+          
+          // UK English Female
+          let femaleVoice = englishVoices.find(v => v.lang === 'en-GB' && v.name.includes('Female')) ||
+                           englishVoices.find(v => v.lang === 'en-GB');
+          
+          // UK English Male
+          let maleVoice = englishVoices.find(v => v.lang === 'en-GB' && v.name.includes('Male')) ||
+                         englishVoices.find(v => v.lang === 'en-GB' && v.name !== femaleVoice?.name) ||
+                         englishVoices.find(v => v.lang === 'en-GB');
+          
+          if (femaleVoice) {
+            // Create a custom object with display label
+            const femaleOption = { name: femaleVoice.name, label: 'UK Female' };
+            selectedVoices.push(femaleOption);
+          }
+          
+          if (maleVoice && maleVoice.name !== femaleVoice?.name) {
+            const maleOption = { name: maleVoice.name, label: 'UK Male' };
+            selectedVoices.push(maleOption);
+          }
+          
+          voiceSelect.innerHTML = selectedVoices
+            .map(voice => `<option value="${voice.name}">${voice.label}</option>`)
+            .join('');
+          
+          // Set first voice (female) as default
+          if (selectedVoices.length > 0) {
+            voiceSelect.value = selectedVoices[0].name;
+          }
+        }
+      }
+
+      // Voice control buttons setup
+      const pauseVoiceBtn = document.getElementById('pause-voice');
+      const resumeVoiceBtn = document.getElementById('resume-voice');
+      let isPaused = false;
+      
+      // Function to update control buttons state
+      function updateVoiceControlsState() {
+        const isSpeaking = speechSynthesis.speaking;
+        
+        // Update pause button
+        if (isSpeaking && !isPaused) {
+          pauseVoiceBtn.classList.add('active');
+          pauseVoiceBtn.disabled = false;
+          resumeVoiceBtn.classList.remove('active');
+          resumeVoiceBtn.disabled = true;
+        } 
+        // Update resume button
+        else if (isSpeaking && isPaused) {
+          pauseVoiceBtn.classList.remove('active');
+          pauseVoiceBtn.disabled = true;
+          resumeVoiceBtn.classList.add('active');
+          resumeVoiceBtn.disabled = false;
+        } 
+        // Both inactive when not speaking
+        else {
+          pauseVoiceBtn.classList.remove('active');
+          pauseVoiceBtn.disabled = true;
+          resumeVoiceBtn.classList.remove('active');
+          resumeVoiceBtn.disabled = true;
+          isPaused = false;
+        }
+      }
+
+      // Update controls state periodically
+      setInterval(updateVoiceControlsState, 100);
+
+      // Initial state
+      updateVoiceControlsState();
+
+      pauseVoiceBtn.addEventListener('click', () => {
+        if (speechSynthesis.speaking && !isPaused) {
+          speechSynthesis.pause();
+          isPaused = true;
+          updateVoiceControlsState();
+        }
+      });
+
+      resumeVoiceBtn.addEventListener('click', () => {
+        if (isPaused) {
+          speechSynthesis.resume();
+          isPaused = false;
+          updateVoiceControlsState();
+        }
+      });
+
+      if ('speechSynthesis' in window) {
+        // Chrome loads voices asynchronously
+        speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices(); // For Firefox
+      } else {
+        voiceOutputToggle.disabled = true;
+        voiceSettings.style.display = 'none';
+      }
+
+      voiceOutputToggle.addEventListener('change', function() {
+        voiceSettings.classList.toggle('active', this.checked);
+        if (!this.checked && currentUtterance) {
+          speechSynthesis.cancel();
+        }
+      });
+
+      // Clean text for speech
+      function cleanTextForSpeech(text) {
+        // First, structure the text for better flow
+        text = text
+          .replace(/([.!?])\s+/g, '$1. ')  // Ensure proper sentence breaks
+          .replace(/,\s+/g, ', ')          // Clean up comma spacing
+          .split(/[.!?]\s+/)               // Split into sentences
+          .map(sentence => {
+            // Add emphasis and pacing within each sentence
+            return sentence
+              // Emphasize key educational terms
+              .replace(/\b(definition|concept|example|important|note|remember|key point)\b/gi, '... $1 ...')
+              // Add slight pauses around explanatory phrases
+              .replace(/\b(for instance|such as|in other words|this means|because|therefore)\b/gi, '... $1 ...')
+              // Emphasize numerical or sequential points
+              .replace(/\b(first|second|third|finally|lastly)\b/gi, '... $1 ...')
+              // Add pauses around parenthetical expressions
+              .replace(/\(([^)]+)\)/g, '... ($1) ...')
+              // Handle lists and enumerations
+              .replace(/,\s+/g, '... , ');
+          })
+          .join('. ');  // Rejoin with proper pauses between sentences
+
+        // Add final touches for natural speech
+        text = text
+          .replace(/\s+\./g, '.')  // Clean up spaces before periods
+          .replace(/\s{2,}/g, ' ') // Normalize multiple spaces
+          .replace(/\.\s+\./g, '.') // Clean up multiple periods
+          .trim();
+
+        return text;
+      }
+
+      function speakText(text) {
+        if (!voiceOutputToggle.checked) return;
+
+        // Cancel any ongoing speech
+        if (speechSynthesis.speaking) {
+          speechSynthesis.cancel();
+        }
+
+        // Clean and prepare the full text for speech
+        let cleanedText = text
+          .split('\n')
+          .filter(line => !line.startsWith('```')) // Remove code blocks
+          .join(' ')
+          .replace(/\*\*/g, '') // Remove markdown formatting
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Clean up links
+          .replace(/\s*\([^)]*\)\s*/g, ' ') // Remove parenthetical content (like citations)
+          .replace(/[•*]/g, '') // Remove bullets
+          // Remove emojis
+          .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+          .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Unicode emoji ranges
+          .replace(/[\u{2600}-\u{27BF}]/gu, '') // Miscellaneous Symbols
+          .replace(/[\u{2300}-\u{23FF}]/gu, '') // Miscellaneous Technical
+          .replace(/[\u{2B50}]/gu, '') // Star emoji
+          .replace(/[\u{203C}-\u{3299}]/gu, '') // Dingbats and other symbols
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim();
+
+        // Process the cleaned text
+        const cleanText = cleanTextForSpeech(cleanedText);
+        if (!cleanText.trim()) return;
+
+        // Create a single utterance with the full text
+        currentUtterance = new SpeechSynthesisUtterance(cleanText);
+        currentSpeechText = cleanText; // Store the text for speed adjustments
+        
+        // Use selected voice if available
+        const selectedVoice = voices.find(v => v.name === voiceSelect.value);
+        if (selectedVoice) {
+          currentUtterance.voice = selectedVoice;
+        }
+
+        // Set speech properties
+        currentUtterance.rate = 0.9;
+        currentUtterance.pitch = 1.1;  // Slightly higher pitch for clarity
+
+        // Set up event handlers
+        currentUtterance.onend = () => {
+          currentUtterance = null;
+          currentSpeechText = '';
+          isPaused = false;
+          updateVoiceControlsState();
+        };
+
+        currentUtterance.onerror = () => {
+          currentUtterance = null;
+          currentSpeechText = '';
+          isPaused = false;
+          updateVoiceControlsState();
+        };
+
+        currentUtterance.onstart = () => {
+          isPaused = false;
+          updateVoiceControlsState();
+        };
+
+        currentUtterance.onpause = () => {
+          isPaused = true;
+          updateVoiceControlsState();
+        };
+
+        currentUtterance.onresume = () => {
+          isPaused = false;
+          updateVoiceControlsState();
+        };
+
+        // Start speaking
+        speechSynthesis.speak(currentUtterance);
+        updateVoiceControlsState();
+      }
+
+      // Speech Recognition Setup
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let recognition;
+      
+      if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+      }
+
+      // Grab elements first
       const chatBox = document.getElementById("chat-box");
+      let chatForm = document.getElementById("chat-form");
+      let chatInput = document.getElementById("user-input");
+      const voiceInputBtn = document.getElementById('voice-input-btn');
+      const voiceStatus = document.getElementById('voice-status');
+      let isListening = false;
+
+      // Voice Recognition Setup
+      if (recognition) {
+        voiceInputBtn.addEventListener('click', async () => {
+          try {
+            // Request microphone permission explicitly
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop()); // Stop the stream after permission
+            toggleVoiceInput();
+          } catch (err) {
+            voiceStatus.textContent = 'Please allow microphone access';
+            voiceStatus.classList.add('active');
+            setTimeout(() => voiceStatus.classList.remove('active'), 3000);
+          }
+        });
+
+        recognition.onstart = () => {
+          isListening = true;
+          voiceInputBtn.classList.add('listening');
+          voiceStatus.textContent = 'Listening...';
+          voiceStatus.classList.add('active');
+        };
+
+        recognition.onresult = (event) => {
+          const transcript = event.results[0][0].transcript;
+          chatInput.value = transcript;
+          voiceStatus.textContent = 'Voice input received!';
+          setTimeout(() => {
+            chatForm.dispatchEvent(new Event('submit'));
+          }, 1000);
+        };
+
+        recognition.onerror = () => {
+          voiceStatus.textContent = 'Error occurred';
+          stopVoiceInput();
+        };
+
+        recognition.onend = () => {
+          stopVoiceInput();
+        };
+      } else {
+        voiceInputBtn.style.display = 'none';
+      }
+
+      function toggleVoiceInput() {
+        if (!isListening) {
+          recognition.start();
+        } else {
+          recognition.stop();
+        }
+      }
+
+      function stopVoiceInput() {
+        isListening = false;
+        voiceInputBtn.classList.remove('listening');
+        voiceStatus.classList.remove('active');
+        setTimeout(() => {
+          voiceStatus.textContent = '';
+        }, 2000);
+      }
 
       function add(role, text, isHTML = false) {
         const wrap = document.createElement('div');
         wrap.className = role === 'user' ? 'user msg' : 'bot msg';
         const label = role === 'user' ? 'You' : 'Teacher';
 
+        // Create label element
+        const labelEl = document.createElement('b');
+        labelEl.textContent = label + ':';
+        wrap.appendChild(labelEl);
+        
+        // Add line break after label
+        wrap.appendChild(document.createElement('br'));
+        
+        // Add message content
         if (isHTML) {
-          wrap.innerHTML = `<b>${label}:</b><br>${text}`;
+          // Create container for HTML content
+          const content = document.createElement('div');
+          content.className = 'message-content';
+          content.innerHTML = text;
+          wrap.appendChild(content);
         } else {
-          wrap.innerText = `${label}: ${text}`;
+          // Create container for text content
+          const content = document.createElement('div');
+          content.className = 'message-content';
+          content.textContent = text;
+          wrap.appendChild(content);
         }
+
+        // Add message to chat box
         chatBox.appendChild(wrap);
-        chatBox.scrollTop = chatBox.scrollHeight;
+        
+        // Scroll to bottom with animation
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
 
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault(); // stop page reload
-        const text = input.value.trim();
+      chatForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const text = chatInput.value.trim();
         if (!text) return;
+        
+        // Cancel any ongoing speech before new response
+        if (speechSynthesis.speaking) {
+          speechSynthesis.cancel();
+          currentUtterance = null;
+        }
 
+        // Display user message
         add('user', text);
-        input.value = "";
+        chatInput.value = "";
+        chatInput.disabled = true;
 
         try {
+          add('bot', 'Thinking...');
+          
           const res = await fetch("/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
             body: JSON.stringify({ message: text })
           });
+          
+          // Remove loading message
+          chatBox.removeChild(chatBox.lastChild);
 
-          // log status to help debugging
-          console.log("POST /chat →", res.status);
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
 
-          const data = await res.json().catch(() => ({}));
+          let data;
+          try {
+            data = await res.json();
+          } catch (error) {
+            throw new Error('Failed to parse response');
+          }
 
-          if (data.reply) {
-            // Render markdown if library is available
+          if (data && (data.reply || data.error)) {
+            const messageText = data.reply || `Error: ${data.error}`;
+            
+            // Clean up text for speech
+            const speechText = messageText
+              // Handle code blocks
+              .replace(/```[\s\S]*?```/g, 'Here is the code example. ')
+              // Remove content in parentheses (but keep space)
+              .replace(/\s*\([^)]*\)\s*/g, ' ')
+              // Clean formatting but keep text
+              .replace(/\*\*(.*?)\*\*/g, '$1')
+              .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+              .replace(/[#*_]/g, '')
+              // Handle multiple newlines (paragraph breaks)
+              .replace(/\n\s*\n\s*\n/g, '. ')
+              // Handle single newlines (preserve flow)
+              .replace(/\n/g, ' ')
+              // Clean up list markers
+              .replace(/^\s*[-*•]\s+/gm, ', ')
+              .replace(/^\s*\d+\.\s+/gm, ', ')
+              // Add pauses for headings and sections
+              .replace(/([^.!?])\s+(?=Hook:|Adventure Time:|Real-Life Magic:|Mind-Blown Moment:|Challenge:|Victory Lap:)/g, '$1. ')
+              // Clean up multiple spaces and periods
+              .replace(/\s+/g, ' ')
+              .replace(/\.+/g, '.')
+              .replace(/\s+\./g, '.')
+              .replace(/\.\s+\./g, '.')
+              .trim();
+
+            // Speak the full response with proper pacing
+            if (voiceOutputToggle.checked && speechText) {
+              speakText(speechText);
+            }
+
+            // Render markdown for detailed text display
             const html = (window.marked && marked.parse)
               ? marked.parse(data.reply)
               : data.reply.replace(/\n/g, "<br>");
+            
+            // Then show the detailed response
             add('bot', html, true);
           } else {
             add('bot', "Error: " + (data.error || `HTTP ${res.status}`));
           }
         } catch (err) {
-          console.error(err);
-          add('bot', "Network error: " + err.message);
+          add('bot', "Error: " + err.message);
+        } finally {
+          chatInput.disabled = false;
+          chatInput.focus();
         }
       });
     </script>
