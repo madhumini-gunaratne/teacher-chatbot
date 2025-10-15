@@ -12,6 +12,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/highlight.min.js"></script>
   </head>
   <body>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light theme">
+      <i class="fas fa-moon"></i>
+    </button>
     <div class="chat-container">
       <h1>🧠 418 Lowkey Genius </h1>
       <div class="controls-container">
@@ -504,6 +507,39 @@
           chatInput.focus();
         }
       });
+
+      // Theme Toggle Functionality
+      const themeToggle = document.getElementById('theme-toggle');
+      const htmlElement = document.documentElement;
+
+      // Check if user has a saved theme preference, otherwise use system preference
+      function initializeTheme() {
+        const savedTheme = localStorage.getItem('theme-preference');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+        
+        setTheme(theme);
+      }
+
+      function setTheme(theme) {
+        if (theme === 'dark') {
+          document.body.classList.add('dark-theme');
+          themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+          localStorage.setItem('theme-preference', 'dark');
+        } else {
+          document.body.classList.remove('dark-theme');
+          themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+          localStorage.setItem('theme-preference', 'light');
+        }
+      }
+
+      themeToggle.addEventListener('click', () => {
+        const isDark = document.body.classList.contains('dark-theme');
+        setTheme(isDark ? 'light' : 'dark');
+      });
+
+      // Initialize theme on page load
+      initializeTheme();
     </script>
   </body>
 </html>
