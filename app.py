@@ -117,18 +117,29 @@ def embed_query(q: str):
 def retrieve(query: str, k=4):
     """Find the most relevant chunks using embeddings similarity"""
     if not INDEX["chunks"] or EMB is None:
+        # If no embeddings, just return the first k chunks
         return INDEX["chunks"][:max(1, k)] if INDEX["chunks"] else []
     
-    # Get query embedding and normalize it
-    q_emb = embed_query(query)
-    q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-10)
-    
-    # Calculate similarity scores
-    scores = EMB @ q_emb
-    
-    # Get top k chunks
-    top_k = np.argsort(scores)[-k:][::-1]
-    return [INDEX["chunks"][i] for i in top_k]
+    # Check if embeddings are dummy (just return all chunks if dimension mismatch)
+    try:
+        # Get query embedding and normalize it
+        q_emb = embed_query(query)
+        q_emb_normalized = q_emb / (np.linalg.norm(q_emb) + 1e-10)
+        
+        # Check dimension compatibility
+        if EMB.shape[1] != len(q_emb):
+            print(f"Dimension mismatch: EMB has {EMB.shape[1]} dims, query has {len(q_emb)} dims. Returning all chunks.")
+            return INDEX["chunks"][:max(1, k)] if INDEX["chunks"] else []
+        
+        # Calculate similarity scores
+        scores = EMB @ q_emb_normalized
+        
+        # Get top k chunks
+        top_k = np.argsort(scores)[-k:][::-1]
+        return [INDEX["chunks"][i] for i in top_k]
+    except Exception as e:
+        print(f"Error in retrieve: {e}")
+        return INDEX["chunks"][:max(1, k)] if INDEX["chunks"] else []
 
 def build_context(chunks):
     parts = []
@@ -194,11 +205,11 @@ def chat():
         print("Received payload:", payload)
         
         if not payload:
-            print("No payload received") # Debug log
+            print("No payload received")
             return jsonify({"error": "No JSON payload received"}), 400
             
         user_message = payload.get("message", "").strip()
-        print("User message:", user_message) # Debug log
+        print("User message:", user_message)
         
         if not user_message:
             return jsonify({"error": "No 'message' in JSON body."}), 400
@@ -208,12 +219,20 @@ def chat():
             session['messages'] = []
 
         # 1) retrieve notes (dummy or real)
-        top_chunks = retrieve(user_message, k=4)
-        context_block = build_context(top_chunks) if top_chunks else ""
+        try:
+            top_chunks = retrieve(user_message, k=4)
+            context_block = build_context(top_chunks) if top_chunks else ""
+        except Exception as e:
+            print(f"Error retrieving context: {e}")
+            context_block = ""
 
         # 2) construct messages with teaching style
-        teaching_style = get_teaching_style()
-        style_instructions = adapt_response_to_style(teaching_style)
+        try:
+            teaching_style = get_teaching_style()
+            style_instructions = adapt_response_to_style(teaching_style)
+        except Exception as e:
+            print(f"Error getting teaching style: {e}")
+            style_instructions = ""
     
         # Base system messages
         messages = [
@@ -242,6 +261,7 @@ def chat():
 
         # 3) call model (with short, deterministic settings)
         try:
+            print(f"Calling OpenAI API with model: {CHAT_MODEL}")
             completion = client.chat.completions.create(
                 model=CHAT_MODEL,
                 messages=messages,
@@ -249,6 +269,7 @@ def chat():
                 max_tokens=400,
             )
             reply = completion.choices[0].message.content
+            print(f"Got reply: {reply[:100]}...")
             
             # Update conversation history
             session['messages'].append({"role": "user", "content": user_message})
@@ -257,6 +278,7 @@ def chat():
             
             return jsonify({"reply": reply})
         except Exception as e:
+            print(f"Error calling OpenAI API: {e}")
             # Fallback: synthesize from context so UI always shows something useful
             if context_block:
                 fallback = (
@@ -273,6 +295,9 @@ def chat():
             return jsonify({"reply": fallback, "error": f"{type(e).__name__}: {e}"}), 200
             
     except Exception as e:
+        print(f"Unexpected error in /chat: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "Server error occurred", "details": str(e)}), 500
 
 if __name__ == "__main__":
