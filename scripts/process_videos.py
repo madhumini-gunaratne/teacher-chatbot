@@ -6,10 +6,10 @@ import json
 from tqdm import tqdm
 from datetime import timedelta
 
-# Paths
+# Configuration
 VIDEOS_DIR = Path("data/media/videos")
 TRANSCRIPTS_DIR = Path("data/media/transcripts")
-AUDIO_MODEL = "base"  # Can be 'tiny', 'base', 'small', 'medium', or 'large'
+AUDIO_MODEL = "base"
 
 def extract_audio(video_path):
     """Extract audio from video file and analyze voice characteristics"""

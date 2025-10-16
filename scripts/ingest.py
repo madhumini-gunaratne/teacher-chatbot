@@ -1,6 +1,6 @@
 import os, json, re
 from pathlib import Path
-from tqdm import tqdm  
+from tqdm import tqdm
 import numpy as np
 from pypdf import PdfReader
 from openai import OpenAI
@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Configuration
 SRC_DIR = Path("data/source")
 OUT_PATH = Path("data/index.json")
 EMBED_MODEL = "text-embedding-3-small"
@@ -16,9 +17,11 @@ CHUNK_SIZE = 900
 CHUNK_OVERLAP = 150
 
 def read_text(p: Path) -> str:
+    """Read text file content."""
     return p.read_text(encoding="utf-8", errors="ignore")
 
 def read_pdf(p: Path) -> str:
+    """Extract text from PDF file."""
     reader = PdfReader(str(p))
     out = []
     for i, page in enumerate(reader.pages, start=1):
@@ -30,18 +33,21 @@ def read_pdf(p: Path) -> str:
     return "\n".join(out)
 
 def normalize_ws(s: str) -> str:
+    """Normalize whitespace in text."""
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
 def chunk_text(s: str, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
+    """Split text into overlapping chunks."""
     chunks = []
     i = 0
     while i < len(s):
-        chunks.append(s[i:i+size])
+        chunks.append(s[i:i + size])
         i += size - overlap
     return [c.strip() for c in chunks if c.strip()]
 
 def file_to_chunks(path: Path):
+    """Convert file to list of text chunks."""
     if path.suffix.lower() in {".txt", ".md"}:
         text = read_text(path)
     elif path.suffix.lower() == ".pdf":
@@ -56,10 +62,12 @@ def file_to_chunks(path: Path):
     ]
 
 def embed_batch(texts):
+    """Get embeddings for batch of texts."""
     resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
     return [d.embedding for d in resp.data]
 
 def main():
+    """Main ingestion pipeline."""
     assert SRC_DIR.exists(), f"{SRC_DIR} not found"
     all_chunks = []
     for p in sorted(SRC_DIR.iterdir()):
@@ -69,11 +77,11 @@ def main():
         print("No .txt/.md/.pdf files found in data/source/")
         return
 
-    # embed in small batches
+    # Embed in batches
     BATCH = 64
     embeds = []
     for i in tqdm(range(0, len(all_chunks), BATCH), desc="Embedding"):
-        batch = all_chunks[i:i+BATCH]
+        batch = all_chunks[i:i + BATCH]
         embeds += embed_batch([c["text"] for c in batch])
 
     for c, v in zip(all_chunks, embeds):
