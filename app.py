@@ -259,14 +259,14 @@ def chat():
             })
         messages.append({"role": "user", "content": user_message})
 
-        # 3) call model (with short, deterministic settings)
+        # 3) call model (with comprehensive, detailed settings for university-level responses)
         try:
             print(f"Calling OpenAI API with model: {CHAT_MODEL}")
             completion = client.chat.completions.create(
                 model=CHAT_MODEL,
                 messages=messages,
-                temperature=0.2,
-                max_tokens=400,
+                temperature=0.3,
+                max_tokens=800,
             )
             reply = completion.choices[0].message.content
             print(f"Got reply: {reply[:100]}...")
