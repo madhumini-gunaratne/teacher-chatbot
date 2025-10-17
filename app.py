@@ -2,7 +2,8 @@ from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 from openai import OpenAI
 from pathlib import Path
-import os, json
+import os
+import json
 import numpy as np
 from datetime import timedelta
 
@@ -11,11 +12,44 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 app.permanent_session_lifetime = timedelta(minutes=30)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# AI model configuration
-CHAT_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-EMBED_MODEL = "text-embedding-3-small"
+# AI Provider Configuration
+# Options: "openai" or "google" - User can override via .env file or UI dropdown
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()  # Default to openai, but can change to "google"
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-3.5-turbo")  # OpenAI default
+EMBED_MODEL = "text-embedding-3-small"  # Always use OpenAI for embeddings
+
+# Initialize AI clients
+openai_client = None
+google_client = None
+
+# Always try to initialize OpenAI (required for embeddings)
+try:
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if openai_api_key:
+        openai_client = OpenAI(api_key=openai_api_key)
+        print("✓ OpenAI client initialized successfully")
+    else:
+        print("Warning: OPENAI_API_KEY not found in .env")
+except Exception as e:
+    print(f"Warning: OpenAI client not configured: {e}")
+
+# Try to initialize Google
+try:
+    import google.generativeai as genai
+    google_key = os.getenv("GOOGLE_API_KEY")
+    if google_key:
+        genai.configure(api_key=google_key)
+        google_client = genai
+        print("✓ Google client initialized successfully")
+    else:
+        print("Warning: GOOGLE_API_KEY not found in .env")
+except ImportError:
+    print("⚠ Google Generative AI not installed. Install with: pip install google-generativeai")
+except Exception as e:
+    print(f"Warning: Google client not configured: {e}")
+    import traceback
+    traceback.print_exc()
 
 # System prompt and teaching style configuration
 def read_text(path, default=""):
@@ -92,11 +126,65 @@ load_index()
 def embed_query(q: str):
     """Get embeddings for query using OpenAI API."""
     try:
-        resp = client.embeddings.create(model=EMBED_MODEL, input=q)
+        if not openai_client:
+            print("OpenAI client not available for embeddings")
+            return np.array([0.0] * 1536, dtype=np.float32)
+        resp = openai_client.embeddings.create(model=EMBED_MODEL, input=q)
         return np.array(resp.data[0].embedding, dtype=np.float32)
     except Exception as e:
         print(f"Error getting embeddings: {e}")
-        return np.array([0.0] * 1536, dtype=np.float32)  # Default embedding dimension
+        return np.array([0.0] * 1536, dtype=np.float32)
+
+def call_ai_model(messages, provider=None, model=None):
+    """
+    Call AI model from specified provider.
+    Supports: openai, google
+    """
+    if provider is None:
+        provider = AI_PROVIDER
+    if model is None:
+        model = CHAT_MODEL
+
+    try:
+        if provider == "openai":
+            if not openai_client:
+                raise ValueError("OpenAI client not configured")
+            completion = openai_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=800,
+            )
+            return completion.choices[0].message.content
+
+        elif provider == "google":
+            if not google_client:
+                raise ValueError("Google client not configured")
+            # Google API expects: generate_content with messages format
+            # Build content for Google API (combine system + user messages)
+            system_content = ""
+            user_content = ""
+            
+            for m in messages:
+                if m["role"] == "system":
+                    system_content += m["content"] + "\n"
+                elif m["role"] == "user":
+                    user_content = m["content"]
+            
+            # Combine system context with user message
+            full_prompt = (system_content + "\n" + user_content).strip()
+            
+            # Use the model name correctly (e.g., "gemini-1.5-flash")
+            model_instance = google_client.GenerativeModel(model)
+            response = model_instance.generate_content(full_prompt)
+            return response.text
+
+        else:
+            raise ValueError(f"Unknown AI provider: {provider}")
+
+    except Exception as e:
+        print(f"Error calling {provider} API: {e}")
+        raise
 
 def retrieve(query: str, k=4):
     """Find most relevant chunks using embeddings similarity."""
@@ -163,14 +251,33 @@ def parse_model_selection(model_string):
     model_map = {
         "openai-gpt35": ("openai", "gpt-3.5-turbo"),
         "openai-gpt4": ("openai", "gpt-4"),
-        "anthropic-opus": ("anthropic", "claude-3-opus-20240229"),
-        "anthropic-sonnet": ("anthropic", "claude-3-sonnet-20240229"),
-        "anthropic-haiku": ("anthropic", "claude-3-haiku-20240307"),
-        "google-gemini": ("google", "gemini-pro"),
+        "google-gemini": ("google", "gemini-2.0-flash"),
     }
     
     provider, model = model_map.get(model_string, ("openai", "gpt-3.5-turbo"))
     return provider, model
+
+def is_initial_greeting(message):
+    """
+    Detect if message is a simple greeting/small talk that shouldn't retrieve context.
+    Returns True if this looks like a greeting that should get a simple response.
+    """
+    # Short messages that are greetings or casual chat
+    greetings = [
+        "hi", "hello", "hey", "greetings", "what's up", "sup", "yo", "yoo", "yooo",
+        "how are you", "how are you doing", "how's it going", "whats up", "wassup",
+        "good morning", "good afternoon", "good evening", "hey there",
+        "what up", "heya", "hiya", "hallo", "howdy", "g'day",
+        "thanks", "thank you", "ty", "thx", "ok", "okay", "k", "kk",
+        "bye", "goodbye", "see you", "cya", "ttyl"
+    ]
+    
+    msg_lower = message.lower().strip()
+    
+    # Exact match or starts with greeting (for longer greetings)
+    is_greeting = any(msg_lower == g or (msg_lower.startswith(g) and len(msg_lower) <= len(g) + 2) for g in greetings)
+    
+    return is_greeting
 
 # Flask Routes
 @app.route("/")
@@ -211,7 +318,28 @@ def chat():
         if 'messages' not in session:
             session['messages'] = []
 
-        # Retrieve relevant context
+        # Check if this is a greeting - skip context for simple greetings
+        is_greeting = is_initial_greeting(user_message)
+        
+        # For greetings, return a quick response without calling API
+        if is_greeting:
+            greeting_responses = [
+                "Hey there! 👋 What would you like to learn about today?",
+                "Hi! 🎉 What's on your mind? Ask me anything about the course!",
+                "Yo! What can I help you with? 🚀",
+                "Hello! Ready to dive in? What do you want to explore? 💡",
+                "What's up! Let's learn something awesome together! 🌟"
+            ]
+            import random
+            reply = random.choice(greeting_responses)
+            session['messages'].append({"role": "user", "content": user_message})
+            session['messages'].append({"role": "assistant", "content": reply})
+            session.modified = True
+            return jsonify({"reply": reply, "provider": provider, "model": model})
+
+        # For non-greetings, retrieve context
+        # Retrieve relevant context for questions
+        context_block = ""
         try:
             top_chunks = retrieve(user_message, k=4)
             context_block = build_context(top_chunks) if top_chunks else ""
@@ -233,8 +361,8 @@ def chat():
             {"role": "system", "content": SIMPLE_STYLE},
         ]
 
-        # Add conversation history (last 5 messages)
-        messages.extend(session['messages'][-5:])
+        # Add conversation history (keep more context - last 10 messages for better continuity)
+        messages.extend(session['messages'][-10:])
 
         if style_instructions:
             messages.append({
@@ -252,7 +380,7 @@ def chat():
             })
         messages.append({"role": "user", "content": user_message})
 
-        # Call OpenAI API
+        # Call AI Model
         try:
             print(f"Calling {provider.upper()} API with model: {model}")
             reply = call_ai_model(messages, provider=provider, model=model)
@@ -264,22 +392,25 @@ def chat():
             session.modified = True
 
             return jsonify({"reply": reply, "provider": provider, "model": model})
+        except ValueError as e:
+            # Handle configuration errors gracefully
+            print(f"Configuration error: {e}")
+            error_msg = f"❌ **{provider.upper()} not configured!**\n\n"
+            error_msg += f"The {provider} API is not properly set up. Please:\n\n"
+            error_msg += "1. Make sure you have the API key in your `.env` file\n"
+            error_msg += f"2. Set `{provider.upper()}_API_KEY` in your `.env`\n"
+            error_msg += "3. Try using **OpenAI (GPT-3.5)** from the dropdown instead\n\n"
+            error_msg += f"*Error: {str(e)}*"
+            return jsonify({"reply": error_msg, "provider": provider, "error": str(e)}), 200
         except Exception as e:
             print(f"Error calling {provider} API: {e}")
-            # Fallback response
-            if context_block:
-                fallback = (
-                    "One-line idea: Answer based on the course notes below.\n"
-                    "1) Read the key lines from notes.\n"
-                    "2) State the concept in plain words.\n"
-                    "3) Give a tiny example (A=0..Z=25 or small numbers).\n"
-                    "4) End with a one-line TL;DR.\n\n"
-                    f"{context_block}\n\n"
-                    "TL;DR: Used the notes above to summarize."
-                )
-            else:
-                fallback = "I couldn't reach the model and I have no notes loaded yet."
-            return jsonify({"reply": fallback, "error": f"{type(e).__name__}: {e}"}), 200
+            error_msg = f"❌ **Error connecting to {provider.upper()}**\n\n"
+            error_msg += f"*{str(e)}*\n\n"
+            error_msg += "**Try:**\n"
+            error_msg += "- Switch to **OpenAI (GPT-3.5)** from the dropdown 🔄\n"
+            error_msg += "- Check your `.env` file configuration ⚙️\n"
+            error_msg += f"- Verify your {provider} API key is valid 🔑"
+            return jsonify({"reply": error_msg, "error": str(e)}), 200
 
     except Exception as e:
         print(f"Unexpected error in /chat: {type(e).__name__}: {e}")

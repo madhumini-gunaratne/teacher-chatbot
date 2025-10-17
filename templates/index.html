@@ -10,8 +10,19 @@
     <!-- Load highlight.js for code highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/highlight.min.js"></script>
+    <script>
+      // Force dark theme immediately before page renders
+      const initialTheme = localStorage.getItem('theme-preference') || 'dark';
+      if (initialTheme === 'warm') {
+        document.documentElement.style.colorScheme = 'light';
+      } else if (initialTheme === 'light') {
+        document.documentElement.style.colorScheme = 'light';
+      } else {
+        document.documentElement.style.colorScheme = 'dark';
+      }
+    </script>
   </head>
-  <body>
+  <body class="dark-theme">
     <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light theme">
       <i class="fas fa-moon"></i>
     </button>
@@ -24,10 +35,7 @@
           <select id="ai-model-select" class="model-select">
             <option value="openai-gpt35">OpenAI - GPT-3.5 Turbo</option>
             <option value="openai-gpt4">OpenAI - GPT-4</option>
-            <option value="anthropic-opus">Anthropic - Claude 3 Opus</option>
-            <option value="anthropic-sonnet">Anthropic - Claude 3 Sonnet</option>
-            <option value="anthropic-haiku">Anthropic - Claude 3 Haiku</option>
-            <option value="google-gemini">Google - Gemini Pro</option>
+            <option value="google-gemini">Google - Gemini 2.0 Flash</option>
           </select>
           <span class="model-status" id="model-status">Ready</span>
         </div>
@@ -558,36 +566,77 @@
 
       // Theme Toggle Functionality
       const themeToggle = document.getElementById('theme-toggle');
-      const htmlElement = document.documentElement;
 
-      // Check if user has a saved theme preference, otherwise use system preference
-      function initializeTheme() {
-        const savedTheme = localStorage.getItem('theme-preference');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
-        
-        setTheme(theme);
-      }
-
-      function setTheme(theme) {
+      function updateThemeUI(theme) {
         if (theme === 'dark') {
-          document.body.classList.add('dark-theme');
+          themeToggle.innerHTML = '<i class="fas fa-fire"></i>';
+          themeToggle.setAttribute('title', 'Switch to warm theme');
+        } else if (theme === 'warm') {
           themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
-          localStorage.setItem('theme-preference', 'dark');
+          themeToggle.setAttribute('title', 'Switch to light theme');
         } else {
-          document.body.classList.remove('dark-theme');
+          // Light theme
           themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
-          localStorage.setItem('theme-preference', 'light');
+          themeToggle.setAttribute('title', 'Switch to dark theme');
         }
       }
 
-      themeToggle.addEventListener('click', () => {
-        const isDark = document.body.classList.contains('dark-theme');
-        setTheme(isDark ? 'light' : 'dark');
-      });
+      function setTheme(theme) {
+        document.body.classList.remove('dark-theme', 'warm-theme');
+
+        if (theme === 'dark') {
+          document.body.classList.add('dark-theme');
+        } else if (theme === 'warm') {
+          document.body.classList.add('warm-theme');
+        }
+
+        updateThemeUI(theme);
+        localStorage.setItem('theme-preference', theme);
+      }
 
       // Initialize theme on page load
-      initializeTheme();
+      function initializeTheme() {
+        const savedTheme = localStorage.getItem('theme-preference') || 'dark';
+        setTheme(savedTheme);
+      }
+
+      // Load saved theme immediately
+      const savedTheme = localStorage.getItem('theme-preference') || 'dark';
+      if (savedTheme === 'warm') {
+        document.body.classList.remove('dark-theme');
+        document.body.classList.add('warm-theme');
+      } else if (savedTheme === 'light') {
+        document.body.classList.remove('dark-theme');
+      }
+      updateThemeUI(savedTheme);
+
+      themeToggle.addEventListener('click', () => {
+        const currentTheme = localStorage.getItem('theme-preference') || 'light';
+        let nextTheme = 'dark';
+
+        if (currentTheme === 'dark') {
+          nextTheme = 'warm';
+        } else if (currentTheme === 'warm') {
+          nextTheme = 'light';
+        }
+
+        setTheme(nextTheme);
+      });
+
+      themeToggle.addEventListener('mouseover', () => {
+        const currentTheme = localStorage.getItem('theme-preference') || 'light';
+        let nextTheme = 'dark';
+
+        if (currentTheme === 'dark') {
+          nextTheme = 'warm';
+        } else if (currentTheme === 'warm') {
+          nextTheme = 'light';
+        }
+
+        themeToggle.setAttribute('title', `Switch to ${nextTheme} theme`);
+      });
+
+      // Theme is already initialized above
     </script>
   </body>
 </html>
