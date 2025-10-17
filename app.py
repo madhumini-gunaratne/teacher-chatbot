@@ -5,6 +5,8 @@ from pathlib import Path
 import os
 import json
 import numpy as np
+import re
+import unicodedata
 from datetime import timedelta
 
 # Load environment variables and initialize Flask app
@@ -279,6 +281,128 @@ def is_initial_greeting(message):
     
     return is_greeting
 
+# 🔐 SECURITY FUNCTIONS
+
+def normalize_text(text):
+    """
+    Normalize text to detect obfuscated injection attempts.
+    Converts leetspeak, removes unicode variations, handles common obfuscation.
+    """
+    # Normalize unicode (removes combining marks, converts fancy unicode to ASCII)
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    
+    # Convert common leetspeak substitutions
+    leetspeak_map = {
+        '0': 'o',
+        '1': 'i',
+        '3': 'e',
+        '4': 'a',
+        '5': 's',
+        '7': 't',
+        '8': 'b',
+        '@': 'a',
+        '$': 's',
+    }
+    
+    for leet, normal in leetspeak_map.items():
+        text = text.replace(leet, normal)
+    
+    return text.lower()
+
+def rot13(text):
+    """Apply ROT13 transformation to detect ROT13-encoded messages"""
+    import codecs
+    return codecs.encode(text, 'rot_13')
+
+def detect_injection_attempts(message):
+    """Detect common prompt injection patterns"""
+    injection_patterns = [
+        r'ignore.*instruction',
+        r'forget.*instruction',
+        r'system prompt',
+        r'forget.*you.*are',
+        r'forget.*role',
+        r'act as.*(?:hacker|admin|assistant|gpt)',
+        r'pretend.*you.*are',
+        r'you.*are.*no.*longer',
+        r'new.*instruction',
+        r'override.*instruction',
+        r'break.*character',
+        r'show me.*code|script|password',
+        r'execute.*command',
+        r'eval\(',
+        r'__import__',
+        r'subprocess',
+        r'hypothetically.*(?:you|i)',
+        r'what if.*you.*(?:were|weren\'t)',
+        r'imagine.*you',
+    ]
+    
+    msg_lower = message.lower()
+    
+    # Check direct patterns
+    for pattern in injection_patterns:
+        if re.search(pattern, msg_lower):
+            print(f"⚠️ Injection attempt detected: {pattern}")
+            return True
+    
+    # Check obfuscated patterns (leetspeak, unicode, etc)
+    normalized = normalize_text(message)
+    for pattern in injection_patterns:
+        if re.search(pattern, normalized):
+            print(f"⚠️ Obfuscated injection detected: {pattern}")
+            return True
+    
+    # Check ROT13-encoded patterns
+    try:
+        rot13_text = rot13(message).lower()
+        for pattern in injection_patterns:
+            if re.search(pattern, rot13_text):
+                print(f"⚠️ ROT13-encoded injection detected: {pattern}")
+                return True
+    except Exception as e:
+        pass  # If ROT13 fails, continue
+    
+    # Flag messages with unusual character density (lots of special chars/unicode)
+    special_char_ratio = sum(1 for c in message if not c.isalnum() and c not in ' \t\n.,!?') / max(len(message), 1)
+    if special_char_ratio > 0.3:  # More than 30% special characters is suspicious
+        print(f"⚠️ Message flagged for unusual character patterns (ratio: {special_char_ratio:.2%})")
+        return True
+    
+    return False
+
+def contains_sensitive_keywords(message):
+    """
+    Detect requests for sensitive information.
+    Uses context-aware patterns to avoid false positives on legitimate questions.
+    """
+    # Patterns that indicate attempting to extract sensitive info
+    extraction_patterns = [
+        r'show.*system prompt',
+        r'what.*system prompt',
+        r'reveal.*api.?key',
+        r'show.*api.?key',
+        r'what.*api.?key',
+        r'your.*password',
+        r'reveal.*password',
+        r'what.*\.env',
+        r'show.*\.env',
+        r'source code.*(?:of|for|you)',
+        r'your.*(?:source code|instructions)',
+        r'show.*source code',
+        r'reveal.*private key',
+        r'what.*private key',
+    ]
+    
+    msg_lower = message.lower()
+    for pattern in extraction_patterns:
+        if re.search(pattern, msg_lower):
+            print(f"⚠️ Sensitive keyword pattern detected: {pattern}")
+            return True
+    
+    return False
+
 # Flask Routes
 @app.route("/")
 def home():
@@ -308,6 +432,13 @@ def chat():
 
         if not user_message:
             return jsonify({"error": "No 'message' in JSON body."}), 400
+
+        # 🔐 SECURITY CHECKS
+        if detect_injection_attempts(user_message):
+            return jsonify({"error": "Your message contains suspicious patterns. Please ask a course-related question."}), 400
+        
+        if contains_sensitive_keywords(user_message):
+            return jsonify({"error": "I can't answer questions about system internals or sensitive information. Please ask about the course content!"}), 400
 
         # Parse selected model from UI
         selected_model_str = payload.get("model", "openai-gpt35")
