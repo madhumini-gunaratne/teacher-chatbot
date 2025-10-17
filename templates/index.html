@@ -18,6 +18,20 @@
     <div class="chat-container">
       <h1>🧠 418 Lowkey Genius </h1>
       <div class="controls-container">
+        <!-- AI Model Selection -->
+        <div class="model-selector">
+          <label for="ai-model-select">🤖 AI Model:</label>
+          <select id="ai-model-select" class="model-select">
+            <option value="openai-gpt35">OpenAI - GPT-3.5 Turbo</option>
+            <option value="openai-gpt4">OpenAI - GPT-4</option>
+            <option value="anthropic-opus">Anthropic - Claude 3 Opus</option>
+            <option value="anthropic-sonnet">Anthropic - Claude 3 Sonnet</option>
+            <option value="anthropic-haiku">Anthropic - Claude 3 Haiku</option>
+            <option value="google-gemini">Google - Gemini Pro</option>
+          </select>
+          <span class="model-status" id="model-status">Ready</span>
+        </div>
+
         <div class="voice-controls">
           <label class="switch">
             <input type="checkbox" id="voice-output-toggle">
@@ -36,9 +50,6 @@
             <button type="button" id="resume-voice" class="control-btn resume-voice-btn">
               <i class="fas fa-play"></i> Resume
             </button>
-            <!-- <button type="button" id="stop-voice" class="control-btn stop-voice-btn">
-              <i class="fas fa-stop"></i> Stop
-            </button> -->
           </div>
         </div>
       </div>
@@ -433,19 +444,42 @@
         try {
           add('bot', 'Thinking...');
           
+          // Get selected AI model
+          const modelSelect = document.getElementById('ai-model-select');
+          const selectedModel = modelSelect ? modelSelect.value : 'openai-gpt35';
+          const modelStatus = document.getElementById('model-status');
+          
+          // Update status
+          if (modelStatus) {
+            modelStatus.textContent = 'Connecting...';
+            modelStatus.classList.add('loading');
+          }
+          
           const res = await fetch("/chat", {
             method: "POST",
             headers: { 
               "Content-Type": "application/json",
               "Accept": "application/json"
             },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({ 
+              message: text,
+              model: selectedModel
+            })
           });
+          
+          // Update status
+          if (modelStatus) {
+            modelStatus.classList.remove('loading');
+          }
           
           // Remove loading message
           chatBox.removeChild(chatBox.lastChild);
 
           if (!res.ok) {
+            if (modelStatus) {
+              modelStatus.textContent = 'Error';
+              modelStatus.classList.add('error');
+            }
             throw new Error(`HTTP error! status: ${res.status}`);
           }
 
@@ -454,6 +488,15 @@
             data = await res.json();
           } catch (error) {
             throw new Error('Failed to parse response');
+          }
+
+          // Update status to show which model responded
+          if (modelStatus && data.provider) {
+            modelStatus.textContent = `${data.provider.toUpperCase()} ✓`;
+            modelStatus.classList.remove('error');
+            setTimeout(() => {
+              modelStatus.textContent = 'Ready';
+            }, 3000);
           }
 
           if (data && (data.reply || data.error)) {
@@ -501,6 +544,11 @@
             add('bot', "Error: " + (data.error || `HTTP ${res.status}`));
           }
         } catch (err) {
+          const modelStatus = document.getElementById('model-status');
+          if (modelStatus) {
+            modelStatus.textContent = 'Error';
+            modelStatus.classList.add('error');
+          }
           add('bot', "Error: " + err.message);
         } finally {
           chatInput.disabled = false;

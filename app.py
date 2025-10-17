@@ -158,6 +158,20 @@ def adapt_response_to_style(teaching_style):
 
     return "\n".join(style_prompts)
 
+def parse_model_selection(model_string):
+    """Parse UI model selection and return provider and model name."""
+    model_map = {
+        "openai-gpt35": ("openai", "gpt-3.5-turbo"),
+        "openai-gpt4": ("openai", "gpt-4"),
+        "anthropic-opus": ("anthropic", "claude-3-opus-20240229"),
+        "anthropic-sonnet": ("anthropic", "claude-3-sonnet-20240229"),
+        "anthropic-haiku": ("anthropic", "claude-3-haiku-20240307"),
+        "google-gemini": ("google", "gemini-pro"),
+    }
+    
+    provider, model = model_map.get(model_string, ("openai", "gpt-3.5-turbo"))
+    return provider, model
+
 # Flask Routes
 @app.route("/")
 def home():
@@ -187,6 +201,11 @@ def chat():
 
         if not user_message:
             return jsonify({"error": "No 'message' in JSON body."}), 400
+
+        # Parse selected model from UI
+        selected_model_str = payload.get("model", "openai-gpt35")
+        provider, model = parse_model_selection(selected_model_str)
+        print(f"Using provider: {provider}, model: {model}")
 
         # Initialize session if not exists
         if 'messages' not in session:
@@ -235,14 +254,8 @@ def chat():
 
         # Call OpenAI API
         try:
-            print(f"Calling OpenAI API with model: {CHAT_MODEL}")
-            completion = client.chat.completions.create(
-                model=CHAT_MODEL,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=800,
-            )
-            reply = completion.choices[0].message.content
+            print(f"Calling {provider.upper()} API with model: {model}")
+            reply = call_ai_model(messages, provider=provider, model=model)
             print(f"Got reply: {reply[:100]}...")
 
             # Update conversation history
@@ -250,9 +263,9 @@ def chat():
             session['messages'].append({"role": "assistant", "content": reply})
             session.modified = True
 
-            return jsonify({"reply": reply})
+            return jsonify({"reply": reply, "provider": provider, "model": model})
         except Exception as e:
-            print(f"Error calling OpenAI API: {e}")
+            print(f"Error calling {provider} API: {e}")
             # Fallback response
             if context_block:
                 fallback = (
